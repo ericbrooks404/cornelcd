@@ -123,6 +123,7 @@ pub fn draw_pose(fb: &mut Framebuffer, grid: &[String], x: i32, y: i32, scale: i
 }
 
 /// Blit one frame at `scale`, top-left anchored at (x, y).
+#[allow(dead_code)]
 pub fn draw(fb: &mut Framebuffer, frame: usize, x: i32, y: i32, scale: i32, bg: u32) {
     let grid = &FRAMES[frame % FRAMES.len()];
     for (row, line) in grid.iter().enumerate() {

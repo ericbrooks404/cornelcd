@@ -85,6 +85,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("took {:.2}s", t.elapsed().as_secs_f32());
         }
+        "blink" => {
+            // Diagnostic: does a panel accept *repeated* updates, or only the
+            // first one? Alternates two solid colours several times.
+            let kb = Keyboard::open()?;
+            let colors = [0xFF_00_00u32, 0x00_00_FF];
+            for round in 0..6 {
+                let mut fb = render::Framebuffer::new();
+                fb.fill(colors[round % 2]);
+                fb.text_centered(70, &format!("{round}"), 0xFFFFFF, 3);
+                let t = std::time::Instant::now();
+                for h in &halves {
+                    kb.push_image(Cmd::ImgFs, *h, &fb.data, None)?;
+                    kb.commit_image(*h, Cmd::ImgFs)?;
+                }
+                println!(
+                    "round {round}: {} in {:.2}s",
+                    if round % 2 == 0 { "RED" } else { "BLUE" },
+                    t.elapsed().as_secs_f32()
+                );
+                sleep(Duration::from_millis(700));
+            }
+        }
         "bench" => {
             // Cost is chunks-per-step; the wire does ~1 chunk per USB frame,
             // measured at 1024 chunks in 1.02s. No hardware needed for this.
@@ -231,70 +253,75 @@ fn run_claude(
     jump_every: Duration,
     flip_landing: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Clawd starts on the right; usage occupies whichever panel he doesn't.
-    // They trade places on every jump.
-    let mut clawd_half = Half::Slave;
+    let _ = (jump_every, flip_landing);
 
-    // Last-pushed frame per panel, so we can diff instead of full-pushing.
-    let mut last: std::collections::HashMap<u8, render::Framebuffer> =
-        std::collections::HashMap::new();
+    // Everything lives on the master panel. The slave cannot take host-pushed
+    // pixels without wedging the firmware, so it keeps the firmware's own
+    // WPM/layer screen — which is genuinely useful and costs us nothing.
+    let half = Half::Master;
+    let mut last: Option<render::Framebuffer> = None;
 
-    let mut frame = 0usize;
     let mut week_ref: u64 = 0;
+    let mut totals = usage::collect()?;
     let mut last_usage_refresh = std::time::Instant::now();
-    let mut last_jump = std::time::Instant::now();
-    let mut need_usage = true;
 
-    println!(
-        "claude screens running — clawd on {clawd_half:?}, jumping every {}s (ctrl-c to stop)",
-        jump_every.as_secs()
-    );
+    // Clawd patrols the bottom strip, turning around at each edge.
+    let span = proto::SCREEN_W as i32 - clawd::W * scale;
+    let stride = 3 * scale;
+    let mut x = 0i32;
+    let mut going_right = true;
+    let mut frame = 0usize;
+
+    println!("claude panel running on the left half — ctrl-c to stop");
+    println!("(right half keeps the firmware's WPM/layer screen; see README)");
 
     loop {
-        let usage_half = other_half(clawd_half);
-
-        // Usage is cheap to compute but expensive to push; refresh sparingly.
-        if need_usage || last_usage_refresh.elapsed() > Duration::from_secs(30) {
-            let t = usage::collect()?;
-            // High-water mark keeps the bar meaningful without inventing a quota.
-            week_ref = week_ref.max(t.week.billable()).max(1);
-            let fb = screens::usage_screen(&t, week_ref);
-            push(kb, usage_half, &fb, last.get(&(usage_half as u8)))?;
-            last.insert(usage_half as u8, fb);
+        if last_usage_refresh.elapsed() > Duration::from_secs(30) {
+            totals = usage::collect()?;
             last_usage_refresh = std::time::Instant::now();
-            need_usage = false;
         }
+        week_ref = week_ref.max(totals.week.billable()).max(1);
 
-        // Time to jump?
-        if last_jump.elapsed() >= jump_every {
-            let dir = match clawd_half {
-                Half::Master => anim::Dir::LeftToRight,
-                Half::Slave => anim::Dir::RightToLeft,
-            };
+        // Alternate the leg pose so he actually looks like he's walking.
+        let legs = if frame % 2 == 0 {
+            clawd::Legs::RunA
+        } else {
+            clawd::Legs::RunB
+        };
 
-            // The departure panel is currently showing Clawd; the arrival panel
-            // is showing usage. Both get wiped as he crosses, which is the
-            // "stats disappear" beat.
-            for step in anim::jump_sequence(dir, scale, flip_landing) {
-                push(kb, step.half, &step.fb, last.get(&(step.half as u8)))?;
-                last.insert(step.half as u8, step.fb);
+        let state = screens::ClawdState {
+            x,
+            frame: frame % 2,
+            legs,
+            mirror: !going_right,
+            lift: 0,
+            scale,
+        };
+
+        let fb = screens::usage_screen(&totals, week_ref, Some(&state));
+        push(kb, half, &fb, last.as_ref())?;
+        last = Some(fb);
+
+        if going_right {
+            x += stride;
+            if x >= span {
+                x = span;
+                going_right = false;
             }
-
-            clawd_half = other_half(clawd_half);
-            need_usage = true; // redraw usage on its new home
-            last_jump = std::time::Instant::now();
-            continue;
+        } else {
+            x -= stride;
+            if x <= 0 {
+                x = 0;
+                going_right = true;
+            }
         }
-
-        let fb = screens::clawd_screen(frame, scale);
-        push(kb, clawd_half, &fb, last.get(&(clawd_half as u8)))?;
-        last.insert(clawd_half as u8, fb);
 
         frame += 1;
         sleep(interval);
     }
 }
 
+#[allow(dead_code)]
 fn other_half(h: Half) -> Half {
     match h {
         Half::Master => Half::Slave,

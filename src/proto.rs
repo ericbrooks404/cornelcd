@@ -17,6 +17,10 @@ use std::fmt;
 pub const VID: u16 = 0x4653;
 pub const PID: u16 = 0x0001;
 
+/// Most chunks we will ever forward to the slave half in one go. Anything
+/// beyond this risks wedging the split link; see `push_image`.
+pub const SLAVE_CHUNK_LIMIT: usize = 24;
+
 /// QMK's raw-HID interface advertises this vendor-defined usage.
 pub const RAW_USAGE_PAGE: u16 = 0xFF60;
 pub const RAW_USAGE: u16 = 0x61;
@@ -95,12 +99,20 @@ impl Screen {
 pub enum Error {
     Hid(hidapi::HidError),
     NotFound,
+    SlaveFloodRefused(usize),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Hid(e) => write!(f, "hid error: {e}"),
+            Error::SlaveFloodRefused(n) => write!(
+                f,
+                "refusing to send {n} chunks to the slave half (limit {SLAVE_CHUNK_LIMIT}).\n\
+                 Slave-bound reports are forwarded one at a time over TRRS; bulk\n\
+                 pixel data there wedges the firmware and needs a power cycle.\n\
+                 Render graphics on the master half, or move the drawing into firmware."
+            ),
             Error::NotFound => write!(
                 f,
                 "no Corne Max raw-HID interface found (looked for {VID:04x}:{PID:04x}, \
@@ -198,6 +210,25 @@ impl Keyboard {
         only_chunks: Option<&[u16]>,
     ) -> Result<usize, Error> {
         const CHUNK: usize = 25;
+
+        // Hard safety guard, learned the hard way.
+        //
+        // Master-bound reports are handled straight off USB. Slave-bound ones
+        // are each forwarded as a separate `transaction_rpc_send` over TRRS,
+        // a link shared with matrix scanning and far slower than USB. Pushing
+        // a full 1024-chunk screen that way wedged the firmware hard enough
+        // that USB interfaces 2 and 3 stopped enumerating (-110 ETIMEDOUT) and
+        // only a full power cycle of both halves recovered it.
+        //
+        // Bulk pixel data must not go to the slave. Small control packets
+        // (screen selection, gauges, strings) are fine — that is what the split
+        // RPC was designed to carry.
+        if half == Half::Slave {
+            let n = only_chunks.map(|c| c.len()).unwrap_or(bytes.len().div_ceil(CHUNK));
+            if n > SLAVE_CHUNK_LIMIT {
+                return Err(Error::SlaveFloodRefused(n));
+            }
+        }
         let total = bytes.len().div_ceil(CHUNK);
         let mut payload = [0u8; 3 + CHUNK];
         let mut sent = 0;
