@@ -16,7 +16,8 @@ cargo build --release
 ## Use
 
 ```sh
-cornelcd claude                 # THE GOOD ONE: usage on the left, Clawd on the right
+cornelcd claude                 # THE GOOD ONE: two-screen Clawd + usage, firmware-rendered
+cornelcd claude-img             # older host-rendered mode, master panel only
 cornelcd usage                  # print token totals to the terminal
 cornelcd clock                  # clock screen, keeps the time updated
 cornelcd stats                  # CPU / GPU / RAM bars
@@ -35,7 +36,55 @@ systemctl --user enable --now cornelcd
 Unit lives at `~/.config/systemd/user/cornelcd.service`. It restarts forever, so
 unplugging the keyboard or flashing it is harmless.
 
-## Custom screens
+## Two-screen mode (the good one)
+
+`cornelcd claude` drives **screen 5**, a custom screen added to the firmware in
+`~/vial-qmk` (branch `corne_max`). Usage lives on one panel, Clawd on the other,
+and they trade places every time he makes a running jump across the gap.
+
+This required a firmware change for a hard reason. See "Why the slave half needs
+firmware rendering" below — the short version is that a frame here costs **5
+bytes instead of ~2500**, which is the difference between working and wedging
+the keyboard.
+
+```sh
+cornelcd claude --jump-every 20 --interval 0.25
+cornelcd clawd --half slave --x 8 --pose 1   # place him by hand, for debugging
+```
+
+Poses are `0-3` facing right (stand, run A, run B, tuck) and `4-7` mirrored.
+
+### Rebuilding the firmware
+
+```sh
+# Regenerate the sprite if the art or scale changes
+cornelcd gensprite --scale 4 > ~/vial-qmk/keyboards/mechboards/crkbd/rp2g/gfx/clawd_gfx.c
+
+cd ~/vial-qmk && make mechboards/crkbd/rp2g:vial ALLOW_WARNINGS=yes
+~/qmk_userspace/flash.sh vial     # once per half
+```
+
+**Flash with double-tap reset, never by holding Q or P.** Bootmagic wipes the
+EEPROM, which is where your Vial keymap lives. A plain reflash is safe:
+`WEAR_LEVELING_RP2040_FLASH_BASE` is anchored to the end of flash, so firmware
+size changes don't move the EEPROM region.
+
+## Why the slave half needs firmware rendering
+
+Master-bound reports are handled straight off USB. Slave-bound ones are each
+forwarded as a separate `transaction_rpc_send` over TRRS — a link shared with
+matrix scanning and far slower than USB.
+
+Pushing a full 1024-chunk screen that way **wedged the firmware**: USB
+interfaces 2 and 3 stopped enumerating (`can't add hid device: -110`), the right
+panel froze on a stale image, and only unplugging both USB *and* TRRS for ~20s
+recovered it. `push_image` now refuses slave writes over `SLAVE_CHUNK_LIMIT`
+chunks.
+
+Small control packets to the slave are fine — that is what the split RPC is for.
+So the fix was to move the drawing into firmware and send state, not pixels.
+
+## Host-rendered screens (`claude-img`)
 
 `cornelcd claude` renders both screens **host-side** as raw RGB565 framebuffers
 and pushes them with `_IMG_FS`. No firmware change, so a Vial keymap is never at
