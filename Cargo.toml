@@ -1,6 +1,6 @@
 [package]
 name = "cornelcd"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Drive the LCD screens on a Corne Max (Mechboards R2G) keyboard over raw HID"
 

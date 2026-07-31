@@ -42,7 +42,7 @@ Section "Clawd" SecMain
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\cornelcd" \
         "UninstallString" '"$INSTDIR\uninstall.exe"'
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\cornelcd" \
-        "DisplayVersion" "0.1.0"
+        "DisplayVersion" "0.1.1"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\cornelcd" \
         "Publisher" "Eric Brooks"
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\cornelcd" \

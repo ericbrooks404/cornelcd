@@ -1,6 +1,6 @@
 # Maintainer: Eric Brooks <eric@4oh4.net>
 pkgname=cornelcd
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Drives the LCD screens on a Corne Max keyboard; shows what Claude Code is doing"
 arch=('x86_64')
