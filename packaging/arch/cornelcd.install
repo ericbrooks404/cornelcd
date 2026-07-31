@@ -1,0 +1,23 @@
+# systemctl --global enable writes into /etc/systemd/user/, which applies to
+# every user session without the package needing to know who will log in.
+post_install() {
+    systemctl --global enable cornelcd.service >/dev/null 2>&1 || true
+    cat <<'MSG'
+Clawd daemon installed and enabled for login sessions.
+
+  Start now without logging out:  systemctl --user start cornelcd
+  Check it:                       systemctl --user status cornelcd
+
+The keyboard animates on its own regardless; this daemon only adds the
+"what is Claude doing" reactions and the tally.
+MSG
+}
+
+post_upgrade() {
+    systemctl --global enable cornelcd.service >/dev/null 2>&1 || true
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+}
+
+pre_remove() {
+    systemctl --global disable cornelcd.service >/dev/null 2>&1 || true
+}

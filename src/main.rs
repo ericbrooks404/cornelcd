@@ -405,7 +405,7 @@ fn run_claude(
         week_ref = week_ref.max(totals.week.billable()).max(1);
 
         // Alternate the leg pose so he actually looks like he's walking.
-        let legs = if frame % 2 == 0 {
+        let legs = if frame.is_multiple_of(2) {
             clawd::Legs::RunA
         } else {
             clawd::Legs::RunB

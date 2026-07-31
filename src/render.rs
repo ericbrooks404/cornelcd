@@ -50,6 +50,7 @@ impl Framebuffer {
     }
 
     /// Horizontal progress bar with a one-pixel border.
+    #[allow(clippy::too_many_arguments)] // geometry + two colours; a struct would obscure more than it clarifies
     pub fn bar(&mut self, x: i32, y: i32, w: i32, h: i32, frac: f32, fg: u32, track: u32) {
         self.rect(x, y, w, h, track);
         let fill = ((w - 2) as f32 * frac.clamp(0.0, 1.0)).round() as i32;

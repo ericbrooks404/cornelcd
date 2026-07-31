@@ -78,7 +78,7 @@ pub fn clawd_screen(frame: usize, scale: i32) -> Framebuffer {
     let y = crate::anim::ground(scale);
 
     // A gentle bob so the whole sprite moves, not just the brush.
-    let bob = if frame % 2 == 0 { 0 } else { 2 };
+    let bob = if frame.is_multiple_of(2) { 0 } else { 2 };
 
     clawd::draw(&mut fb, frame, x, y + bob, scale, BG);
 

@@ -1,0 +1,32 @@
+# Maintainer: Eric Brooks <eric@4oh4.net>
+pkgname=cornelcd
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Drives the LCD screens on a Corne Max keyboard; shows what Claude Code is doing"
+arch=('x86_64')
+url="https://github.com/ericbrooks404/cornelcd"
+license=('MIT')
+# hidapi's bundled C is compiled by the cc crate. With makepkg's -flto those
+# objects come out as GCC LTO bitcode that rust's linker cannot resolve, giving
+# "undefined symbol: hid_open". Disabling LTO here is the standard fix for Rust
+# packages carrying C dependencies.
+options=(!lto)
+depends=('hidapi')
+makedepends=('cargo')
+install=cornelcd.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$srcdir/$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo build --release --locked
+}
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+    install -Dm755 target/release/cornelcd "$pkgdir/usr/bin/cornelcd"
+    install -Dm644 packaging/cornelcd.service \
+        "$pkgdir/usr/lib/systemd/user/cornelcd.service"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

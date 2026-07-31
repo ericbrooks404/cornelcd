@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+# Applies to every user session without needing to know the username.
+if [ -d /run/systemd/system ]; then
+    systemctl --global enable cornelcd.service >/dev/null 2>&1 || true
+fi
+cat <<'MSG'
+Clawd daemon installed and enabled for login sessions.
+
+  Start now without logging out:  systemctl --user start cornelcd
+  Check it:                       systemctl --user status cornelcd
+MSG
+exit 0

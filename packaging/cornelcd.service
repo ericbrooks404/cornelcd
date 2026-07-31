@@ -1,0 +1,15 @@
+[Unit]
+Description=Clawd — Corne Max LCD daemon
+Documentation=https://github.com/ericbrooks404/cornelcd
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cornelcd daemon
+# The keyboard may be absent, in the bootloader, or mid-reflash. The daemon
+# handles that itself, but restart anyway so a hard failure is never terminal.
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
