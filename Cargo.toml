@@ -8,6 +8,17 @@ description = "Drive the LCD screens on a Corne Max (Mechboards R2G) keyboard ov
 hidapi = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
+# Tray, per platform. Linux uses StatusNotifierItem over D-Bus (what waybar,
+# GNOME and KDE all speak) so there is no GTK dependency. Windows uses the
+# Shell_NotifyIcon wrapper.
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.19"
+# Just enough Win32 for a message pump; tray-icon needs one to deliver events.
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+
 [profile.release]
 opt-level = "s"
 lto = true

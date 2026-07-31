@@ -1,4 +1,6 @@
 //! CPU and memory usage straight from /proc. No crates needed.
+//!
+//! Linux-only: the `stats` command is compiled out elsewhere.
 
 use std::fs;
 use std::io;

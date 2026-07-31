@@ -11,7 +11,7 @@
 use chrono::{DateTime, Duration, Utc};
 use std::fs;
 use std::io::{self, BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct Tokens {
@@ -45,8 +45,7 @@ pub struct Totals {
 }
 
 pub fn projects_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
-    Path::new(&home).join(".claude/projects")
+    crate::paths::claude_projects().unwrap_or_else(|| PathBuf::from(".claude/projects"))
 }
 
 /// Collect totals. `session` is the most recently modified transcript.

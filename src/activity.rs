@@ -164,8 +164,9 @@ impl Watcher {
 }
 
 fn newest_transcript() -> io::Result<Option<PathBuf>> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
-    let root = PathBuf::from(home).join(".claude/projects");
+    let Some(root) = crate::paths::claude_projects() else {
+        return Ok(None);
+    };
 
     let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
     let Ok(projects) = fs::read_dir(&root) else {
