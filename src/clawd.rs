@@ -63,6 +63,65 @@ fn pal(ch: char, bg: u32) -> Option<u32> {
     })
 }
 
+/// Leg position. The stock sprite only ever stands, so run and tuck poses are
+/// synthesised by swapping rows 10-11 — the body, eyes and brush stay authentic.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Legs {
+    Stand,
+    RunA,
+    RunB,
+    Tuck,
+}
+
+impl Legs {
+    fn rows(self) -> [&'static str; 2] {
+        match self {
+            Legs::Stand => ["...OO..OO.......", "...OO..OO......."],
+            Legs::RunA => ["..OO....OO......", ".OO.......OO...."],
+            Legs::RunB => ["...OO..OO.......", "..OO....OO......"],
+            Legs::Tuck => ["...OOOOOO.......", "................"],
+        }
+    }
+}
+
+/// Build a 16x14 pose: `base` picks which arm/brush frame to use, `legs`
+/// replaces the leg rows, `mirror` flips horizontally for running left.
+pub fn pose(base: usize, legs: Legs, mirror: bool) -> Vec<String> {
+    let src = &FRAMES[base % FRAMES.len()];
+    let legs = legs.rows();
+
+    (0..H as usize)
+        .map(|row| {
+            let s = match row {
+                10 => legs[0],
+                11 => legs[1],
+                _ => src[row],
+            };
+            if mirror {
+                s.chars().rev().collect()
+            } else {
+                s.to_string()
+            }
+        })
+        .collect()
+}
+
+/// Blit an arbitrary pose grid.
+pub fn draw_pose(fb: &mut Framebuffer, grid: &[String], x: i32, y: i32, scale: i32, bg: u32) {
+    for (row, line) in grid.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            let Some(rgb) = pal(ch, bg) else { continue };
+            fb.rect(
+                x + col as i32 * scale,
+                y + row as i32 * scale,
+                scale,
+                scale,
+                rgb,
+            );
+        }
+    }
+}
+
 /// Blit one frame at `scale`, top-left anchored at (x, y).
 pub fn draw(fb: &mut Framebuffer, frame: usize, x: i32, y: i32, scale: i32, bg: u32) {
     let grid = &FRAMES[frame % FRAMES.len()];

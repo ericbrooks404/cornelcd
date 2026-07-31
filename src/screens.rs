@@ -50,20 +50,20 @@ pub fn usage_screen(t: &Totals, week_ref: u64) -> Framebuffer {
 /// Right half: Clawd, waving his paintbrush.
 ///
 /// 16x14 at 4x is 64x56, centred, with room for a caption underneath.
-pub fn clawd_screen(frame: usize) -> Framebuffer {
+pub fn clawd_screen(frame: usize, scale: i32) -> Framebuffer {
     let mut fb = Framebuffer::new();
     fb.fill(BG);
 
-    const SCALE: i32 = 4;
-    let x = (80 - clawd::W * SCALE) / 2;
-    let y = 40;
+    let x = (80 - clawd::W * scale) / 2;
+    // Same ground line the jump uses, so idle and animation line up exactly.
+    let y = crate::anim::ground(scale);
 
     // A gentle bob so the whole sprite moves, not just the brush.
     let bob = if frame % 2 == 0 { 0 } else { 2 };
 
-    clawd::draw(&mut fb, frame, x, y + bob, SCALE, BG);
+    clawd::draw(&mut fb, frame, x, y + bob, scale, BG);
 
-    fb.text_centered(120, "CLAWD", CLAUDE_ORANGE, 1);
+    fb.text_centered(16, "CLAWD", CLAUDE_ORANGE, 1);
 
     fb
 }

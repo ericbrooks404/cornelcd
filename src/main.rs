@@ -1,5 +1,6 @@
 //! Drive the LCD screens on a Corne Max over raw HID.
 
+mod anim;
 mod clawd;
 mod proto;
 mod render;
@@ -84,6 +85,47 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("took {:.2}s", t.elapsed().as_secs_f32());
         }
+        "bench" => {
+            // Cost is chunks-per-step; the wire does ~1 chunk per USB frame,
+            // measured at 1024 chunks in 1.02s. No hardware needed for this.
+            const MS_PER_CHUNK: f32 = 1.0;
+            for scale in [2, 3, 4] {
+                let steps = anim::jump_sequence(anim::Dir::LeftToRight, scale, false);
+                let mut prev: std::collections::HashMap<u8, render::Framebuffer> =
+                    std::collections::HashMap::new();
+                let mut counts = Vec::new();
+
+                for s in &steps {
+                    let key = s.half as u8;
+                    let n = match prev.get(&key) {
+                        Some(p) => s.fb.diff_chunks(p).len(),
+                        None => proto::FB_LEN.div_ceil(25),
+                    };
+                    counts.push(n);
+                    prev.insert(key, render::Framebuffer { data: s.fb.data.clone() });
+                }
+
+                // Skip the two initial full pushes when judging the run itself.
+                let moving: Vec<usize> =
+                    counts.iter().copied().filter(|&n| n < 1000).collect();
+                let avg = moving.iter().sum::<usize>() as f32 / moving.len().max(1) as f32;
+                let worst = moving.iter().copied().max().unwrap_or(0);
+
+                println!(
+                    "scale {scale}x ({}x{} px): {} steps, avg {:.0} chunks/step, worst {worst}",
+                    clawd::W * scale,
+                    clawd::H * scale,
+                    steps.len(),
+                    avg,
+                );
+                println!(
+                    "            -> {:.1} fps avg, {:.1} fps worst case, {:.1}s for the whole jump",
+                    1000.0 / (avg * MS_PER_CHUNK),
+                    1000.0 / (worst as f32 * MS_PER_CHUNK),
+                    counts.iter().sum::<usize>() as f32 * MS_PER_CHUNK / 1000.0,
+                );
+            }
+        }
         "usage" => {
             let t = usage::collect()?;
             println!(
@@ -101,8 +143,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         "claude" => {
+            let scale = parse_num(&args, "--scale", 4.0)? as i32;
+            let every = Duration::from_secs_f64(parse_num(&args, "--jump-every", 20.0)?);
+            let flip = args.iter().any(|a| a == "--flip-landing");
             let kb = Keyboard::open()?;
-            run_claude(&kb, interval)?;
+            run_claude(&kb, interval, scale, every, flip)?;
+        }
+        "jump" => {
+            let scale = parse_num(&args, "--scale", 4.0)? as i32;
+            let flip = args.iter().any(|a| a == "--flip-landing");
+            let dir = match args.get(1).map(String::as_str) {
+                Some("left") => anim::Dir::RightToLeft,
+                _ => anim::Dir::LeftToRight,
+            };
+            let kb = Keyboard::open()?;
+            let steps = anim::jump_sequence(dir, scale, flip);
+            let t = std::time::Instant::now();
+            let mut last: std::collections::HashMap<u8, render::Framebuffer> =
+                std::collections::HashMap::new();
+            let mut chunks = 0;
+            for step in steps {
+                chunks += push(&kb, step.half, &step.fb, last.get(&(step.half as u8)))?;
+                last.insert(step.half as u8, step.fb);
+            }
+            println!(
+                "{dir:?}: {chunks} chunks in {:.2}s",
+                t.elapsed().as_secs_f32()
+            );
         }
         "clock" => {
             let kb = Keyboard::open()?;
@@ -157,37 +224,81 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// A full frame is 1024 chunks and takes about a second, so only the chunks
 /// that actually changed get pushed. Clawd's body is identical between frames,
 /// so the animation touches a small fraction of the screen.
-fn run_claude(kb: &Keyboard, interval: Duration) -> Result<(), Box<dyn std::error::Error>> {
-    // Send both halves a full frame once, then diff from here on.
-    let mut last_usage: Option<render::Framebuffer> = None;
-    let mut last_clawd: Option<render::Framebuffer> = None;
+fn run_claude(
+    kb: &Keyboard,
+    interval: Duration,
+    scale: i32,
+    jump_every: Duration,
+    flip_landing: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Clawd starts on the right; usage occupies whichever panel he doesn't.
+    // They trade places on every jump.
+    let mut clawd_half = Half::Slave;
+
+    // Last-pushed frame per panel, so we can diff instead of full-pushing.
+    let mut last: std::collections::HashMap<u8, render::Framebuffer> =
+        std::collections::HashMap::new();
 
     let mut frame = 0usize;
-    let mut ticks = 0u32;
     let mut week_ref: u64 = 0;
+    let mut last_usage_refresh = std::time::Instant::now();
+    let mut last_jump = std::time::Instant::now();
+    let mut need_usage = true;
 
-    println!("claude screens running (left: usage, right: clawd) — ctrl-c to stop");
+    println!(
+        "claude screens running — clawd on {clawd_half:?}, jumping every {}s (ctrl-c to stop)",
+        jump_every.as_secs()
+    );
 
     loop {
-        // Usage is expensive to recompute and barely moves; refresh it on the
-        // first tick and then every 30 animation frames.
-        if ticks % 30 == 0 {
+        let usage_half = other_half(clawd_half);
+
+        // Usage is cheap to compute but expensive to push; refresh sparingly.
+        if need_usage || last_usage_refresh.elapsed() > Duration::from_secs(30) {
             let t = usage::collect()?;
-            // Keep the bar's reference at the high-water mark so it stays
-            // meaningful without pretending to know a real quota.
+            // High-water mark keeps the bar meaningful without inventing a quota.
             week_ref = week_ref.max(t.week.billable()).max(1);
             let fb = screens::usage_screen(&t, week_ref);
-            push(kb, Half::Master, &fb, last_usage.as_ref())?;
-            last_usage = Some(fb);
+            push(kb, usage_half, &fb, last.get(&(usage_half as u8)))?;
+            last.insert(usage_half as u8, fb);
+            last_usage_refresh = std::time::Instant::now();
+            need_usage = false;
         }
 
-        let fb = screens::clawd_screen(frame);
-        push(kb, Half::Slave, &fb, last_clawd.as_ref())?;
-        last_clawd = Some(fb);
+        // Time to jump?
+        if last_jump.elapsed() >= jump_every {
+            let dir = match clawd_half {
+                Half::Master => anim::Dir::LeftToRight,
+                Half::Slave => anim::Dir::RightToLeft,
+            };
+
+            // The departure panel is currently showing Clawd; the arrival panel
+            // is showing usage. Both get wiped as he crosses, which is the
+            // "stats disappear" beat.
+            for step in anim::jump_sequence(dir, scale, flip_landing) {
+                push(kb, step.half, &step.fb, last.get(&(step.half as u8)))?;
+                last.insert(step.half as u8, step.fb);
+            }
+
+            clawd_half = other_half(clawd_half);
+            need_usage = true; // redraw usage on its new home
+            last_jump = std::time::Instant::now();
+            continue;
+        }
+
+        let fb = screens::clawd_screen(frame, scale);
+        push(kb, clawd_half, &fb, last.get(&(clawd_half as u8)))?;
+        last.insert(clawd_half as u8, fb);
 
         frame += 1;
-        ticks += 1;
         sleep(interval);
+    }
+}
+
+fn other_half(h: Half) -> Half {
+    match h {
+        Half::Master => Half::Slave,
+        Half::Slave => Half::Master,
     }
 }
 
@@ -322,4 +433,17 @@ fn describe(halves: &[Half]) -> String {
 /// Pack 8-bit RGB into RGB565.
 fn rgb565(r: u8, g: u8, b: u8) -> u16 {
     ((r as u16 & 0xF8) << 8) | ((g as u16 & 0xFC) << 3) | (b as u16 >> 3)
+}
+
+/// Parse a `--flag <number>` option, falling back to `default`.
+fn parse_num(args: &[String], flag: &str, default: f64) -> Result<f64, Box<dyn std::error::Error>> {
+    let Some(i) = args.iter().position(|a| a == flag) else {
+        return Ok(default);
+    };
+    args.get(i + 1)
+        .ok_or_else(|| format!("{flag} needs a value").into())
+        .and_then(|v| {
+            v.parse::<f64>()
+                .map_err(|_| format!("{flag} must be a number").into())
+        })
 }
