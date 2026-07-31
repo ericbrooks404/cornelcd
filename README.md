@@ -86,15 +86,15 @@ So the fix was to move the drawing into firmware and send state, not pixels.
 
 ## Host-rendered screens (`claude-img`)
 
-`cornelcd claude` renders both screens **host-side** as raw RGB565 framebuffers
-and pushes them with `_IMG_FS`. No firmware change, so a Vial keymap is never at
-risk.
+`cornelcd claude-img` renders **host-side** as a raw RGB565 framebuffer and
+pushes it with `_IMG_FS`. It needs no firmware change, which makes it the
+fallback if you ever run stock firmware — but it is **master panel only**, for
+the reason above.
 
-- **Left (master)** — Claude Code token usage, read from
-  `~/.claude/projects/*/*.jsonl`. Session total, 7-day total, in/out/cache
-  breakdown. ~17 ms to scan 176 MB: files older than a week are skipped by
-  mtime, and lines without `"usage"` are rejected before parsing.
-- **Right (slave)** — Clawd waving his paintbrush.
+It draws usage and a patrolling Clawd on the one panel. Usage comes from
+`~/.claude/projects/*/*.jsonl`: session total, 7-day total, in/out/cache
+breakdown. ~17 ms to scan 176 MB, since files older than a week are skipped by
+mtime and lines without `"usage"` are rejected before parsing.
 
 Clawd's sprite is the real one, extracted from the Claude Code binary
 (`CLAWD_FRAMES` / `CLAWD_PAL`): 16x14, two frames, `#D97757` body, `#2A1F1B`
@@ -169,7 +169,10 @@ Protocol reference lives in `src/proto.rs`, mirroring
 
 ## Not implemented yet
 
-Image push (`_IMAGE` / `_IMG_FS` / `_IMG_GIF`, commands 8-10). These transfer in
-25-byte chunks into buffers of 8 KB, 25 KB and 125 KB respectively, then commit
-with a `_STATUS` write. Pixel format is RGB565 at 80x160. The constants are
-already in `proto.rs`.
+- **Album-art and GIF push** (`_IMAGE`, `_IMG_GIF`). `_IMG_FS` is implemented;
+  these two are not. Same chunked transfer into 8 KB and 125 KB buffers.
+- **The firmware's GIF path is broken anyway**: the `ezgif` descriptor is
+  declared but never populated (`display.c` has the line that would set its size
+  commented out), so screen 4 renders nothing. Fixing that would give native
+  in-firmware GIF animation at full frame rate.
+- **Real quota percentages.** Only token counts are recoverable locally.
