@@ -6,12 +6,64 @@ raw HID. Rust, two dependencies.
 The firmware ships five screen layouts but no host software to feed them —
 CannonKeys' own tool is still listed as WIP. This fills that gap.
 
-## Build
+## Install
+
+Every installer sets the daemon to start at login.
+
+**Arch**
+
+```sh
+cd packaging/arch && makepkg -si
+systemctl --user start cornelcd     # or just log out and back in
+```
+
+**Debian / Ubuntu** — grab the `.deb` from
+[Releases](https://github.com/ericbrooks404/cornelcd/releases):
+
+```sh
+sudo apt install ./cornelcd_0.1.0-1_amd64.deb
+systemctl --user start cornelcd
+```
+
+**Windows** — run `cornelcd-setup.exe` from Releases. Per-user install, no admin
+rights, and it adds itself to the login Run key. Uninstall via Add/Remove
+Programs.
+
+### Build from source
 
 ```sh
 cargo build --release
 # -> target/release/cornelcd
 ```
+
+On Arch, if you package it yourself, keep `options=(!lto)` in the PKGBUILD:
+hidapi's bundled C is compiled by the `cc` crate, and makepkg's `-flto` makes
+those objects LTO bitcode that rust's linker cannot resolve
+(`undefined symbol: hid_open`).
+
+## The tray daemon
+
+```sh
+cornelcd daemon
+```
+
+Sits in the system tray as Clawd. Right-click for status, a toggle for whether
+to report Claude's activity, and Quit.
+
+- **Linux** uses StatusNotifierItem over D-Bus — what waybar, GNOME and KDE all
+  speak — so there is no GTK dependency.
+- **Windows** uses `Shell_NotifyIcon` with a small Win32 message pump.
+
+The worker reconnects on its own, so unplugging the keyboard, reflashing it, or
+suspending the machine are all non-events. If the daemon stops entirely, the
+firmware watchdog forgets it within 10s and Clawd goes back to his autonomous
+routine — nothing on the keyboard depends on this being alive.
+
+### Autostart
+
+Linux packages run `systemctl --global enable cornelcd.service`, which enables
+the user unit for every login session without the package needing to know the
+username. Windows uses the per-user `HKCU\...\CurrentVersion\Run` key.
 
 ## Use
 

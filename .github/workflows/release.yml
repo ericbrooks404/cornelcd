@@ -42,10 +42,25 @@ jobs:
       - name: Stage installer inputs
         shell: pwsh
         run: Copy-Item target\release\cornelcd.exe packaging\windows\
-      - name: Build installer
+      - name: Ensure NSIS
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" packaging\windows\installer.nsi
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            $p = "${env:ProgramFiles(x86)}\NSIS"
+            if (Test-Path "$p\makensis.exe") {
+              echo "$p" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+            } else {
+              choco install nsis -y --no-progress
+              echo "$p" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+            }
+          }
+      - name: Build installer
+        shell: pwsh
+        # makensis resolves relative paths against the working directory, not
+        # the script's location, so the ..\..\LICENSE references only work
+        # from inside packaging/windows.
+        working-directory: packaging/windows
+        run: makensis installer.nsi
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
