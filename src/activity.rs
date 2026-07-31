@@ -40,6 +40,12 @@ pub struct Watcher {
     partial: String,
 }
 
+impl Default for Watcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Watcher {
     pub fn new() -> Watcher {
         Watcher {

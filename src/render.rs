@@ -16,6 +16,12 @@ pub struct Framebuffer {
     pub data: Vec<u8>,
 }
 
+impl Default for Framebuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Framebuffer {
     pub fn new() -> Framebuffer {
         Framebuffer {
