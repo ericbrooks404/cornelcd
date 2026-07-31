@@ -16,12 +16,59 @@ cargo build --release
 ## Use
 
 ```sh
+cornelcd claude                 # THE GOOD ONE: usage on the left, Clawd on the right
+cornelcd usage                  # print token totals to the terminal
 cornelcd clock                  # clock screen, keeps the time updated
 cornelcd stats                  # CPU / GPU / RAM bars
 cornelcd screen 0               # switch screens and exit (0-4)
 cornelcd text "now playing"     # set the label on the now-playing screen
+cornelcd testimg                # colour bands, for checking byte order/stride
 cornelcd probe                  # list HID interfaces, show which one is raw HID
 ```
+
+### Run it at login
+
+```sh
+systemctl --user enable --now cornelcd
+```
+
+Unit lives at `~/.config/systemd/user/cornelcd.service`. It restarts forever, so
+unplugging the keyboard or flashing it is harmless.
+
+## Custom screens
+
+`cornelcd claude` renders both screens **host-side** as raw RGB565 framebuffers
+and pushes them with `_IMG_FS`. No firmware change, so a Vial keymap is never at
+risk.
+
+- **Left (master)** — Claude Code token usage, read from
+  `~/.claude/projects/*/*.jsonl`. Session total, 7-day total, in/out/cache
+  breakdown. ~17 ms to scan 176 MB: files older than a week are skipped by
+  mtime, and lines without `"usage"` are rejected before parsing.
+- **Right (slave)** — Clawd waving his paintbrush.
+
+Clawd's sprite is the real one, extracted from the Claude Code binary
+(`CLAWD_FRAMES` / `CLAWD_PAL`): 16x14, two frames, `#D97757` body, `#2A1F1B`
+eyes. See `src/clawd.rs`.
+
+### Two things that cost real time to discover
+
+**The panel reads RGB565 big-endian.** Little-endian renders correct *shapes* in
+wrong *colours* — red shows as blue, orange as purple. Byte packing is
+centralised in `render.rs` so this can only be got wrong once.
+
+**Bandwidth is ~25 KB/s.** One 25-byte chunk per USB frame, so a full 25,600-byte
+screen takes about a second. Animation therefore pushes only the chunks that
+changed (`Framebuffer::diff_chunks`). Big moving sprites are expensive; small
+ones are cheap.
+
+### The weekly bar is a trend, not a quota
+
+Claude Code stores no rate-limit or quota data on disk — checked for
+`rate_limit`, `resets_at`, `remaining`, `quota`, `utilization` across every
+transcript, none present. So the bar is scaled against a running high-water mark.
+**The token numbers are exact; the bar's fullness is relative to your own peak,
+not a real percentage.**
 
 Options:
 

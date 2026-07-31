@@ -1,0 +1,12 @@
+[Unit]
+Description=Corne Max LCD screens (Claude usage + Clawd)
+After=graphical-session.target
+
+[Service]
+ExecStart=/home/lucian/code/cornelcd/target/release/cornelcd claude --interval 0.5
+# The keyboard may be unplugged or in the bootloader; just keep retrying.
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
