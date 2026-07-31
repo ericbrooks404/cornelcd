@@ -148,3 +148,87 @@ pub fn pal_pub(ch: char) -> Option<u32> {
         _ => pal(ch, 0x000000),
     }
 }
+
+/// Extra poses for activity states, drawn in the same 16x14 grid and palette.
+///
+/// Paint reuses the two stock frames verbatim — the original art is already
+/// Clawd working a brush, so "Claude is editing" maps onto it exactly.
+/// Sleep and look only move the eyes, which keeps the body authentic.
+pub const EXTRA_FRAMES: [(&str, [&str; 14]); 4] = [
+    (
+        "sleep_a",
+        [
+            "................",
+            "................",
+            "................",
+            "..OOOOOOOO......",
+            "..OOOOOOOO......",
+            "..OOOOOOOO......", // eyes shut: upper row loses its pupils
+            "..OODOODOO......", // and the lower row reads as closed lids
+            "..OOOOOOOO......",
+            "..OOOOOOOO......",
+            "..OOOOOOOO......",
+            "...OO..OO.......",
+            "...OO..OO.......",
+            "................",
+            "................",
+        ],
+    ),
+    (
+        "sleep_b",
+        [
+            "..........FFF...", // a small z, blinking on alternate frames
+            "...........F....",
+            "..........FFF...",
+            "..OOOOOOOO......",
+            "..OOOOOOOO......",
+            "..OOOOOOOO......",
+            "..OODOODOO......",
+            "..OOOOOOOO......",
+            "..OOOOOOOO......",
+            "..OOOOOOOO......",
+            "...OO..OO.......",
+            "...OO..OO.......",
+            "................",
+            "................",
+        ],
+    ),
+    (
+        "look_a",
+        [
+            "................",
+            "................",
+            "................",
+            "..OOOOOOOO......",
+            "..OOOOOOOO......",
+            "..ODOODOOO......", // pupils shifted left
+            "..ODOODOOO....B.",
+            "..OOOOOOOOOHHFB.",
+            "..OOOOOOOO....B.",
+            "..OOOOOOOO......",
+            "...OO..OO......b",
+            "...OO..OO.......",
+            "................",
+            "................",
+        ],
+    ),
+    (
+        "look_b",
+        [
+            "................",
+            "................",
+            "................",
+            "..OOOOOOOO......",
+            "..OOOOOOOO......",
+            "..OOODOODO......", // pupils shifted right
+            "..OOODOODO....B.",
+            "..OOOOOOOOOHHFB.",
+            "..OOOOOOOO....B.",
+            "..OOOOOOOO......",
+            "...OO..OO......b",
+            "...OO..OO.......",
+            "................",
+            "................",
+        ],
+    ),
+];

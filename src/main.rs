@@ -1,5 +1,6 @@
 //! Drive the LCD screens on a Corne Max over raw HID.
 
+mod activity;
 mod anim;
 mod clawd;
 mod proto;
@@ -166,8 +167,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("}};\n");
             }
 
+            // Activity poses: paint reuses the stock frames, the rest are
+            // literal grids in clawd::EXTRA_FRAMES.
+            let mut extra_names: Vec<String> = Vec::new();
+            let painted: [(usize, &str); 2] = [(0, "paint_a"), (1, "paint_b")];
+            for (base, name) in painted {
+                let grid = clawd::pose(base, Legs::Stand, false);
+                emit_pose(&grid, name, sc);
+                extra_names.push(name.to_string());
+            }
+            for (name, rows) in clawd::EXTRA_FRAMES {
+                let grid: Vec<String> = rows.iter().map(|r| r.to_string()).collect();
+                emit_pose(&grid, name, sc);
+                extra_names.push(name.to_string());
+            }
+
             println!("const lv_img_dsc_t *const clawd_poses[CLAWD_POSE_COUNT] = {{");
             for (_, _, _, name) in poses {
+                println!("    &clawd_{name},");
+            }
+            for name in &extra_names {
                 println!("    &clawd_{name},");
             }
             println!("}};");
@@ -243,9 +262,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("clawd x={x} pose={pose} lift={lift} visible={}", !hide);
         }
         "claude" => {
-            let every = Duration::from_secs_f64(parse_num(&args, "--jump-every", 20.0)?);
             let kb = Keyboard::open()?;
-            run_claude_fw(&kb, interval, every)?;
+            run_watch(&kb, interval)?;
+        }
+        "watch" => {
+            let kb = Keyboard::open()?;
+            run_watch(&kb, interval)?;
+        }
+        "activity" => {
+            // Print what we would report, without touching the keyboard.
+            let mut w = activity::Watcher::new();
+            let st = w.poll()?;
+            let t = w.tally();
+            println!("state: {} ({st})", activity::state_name(st));
+            println!("last tool: {:?}", w.last_tool());
+            println!("tally: bash={} edit={} write={} web={}", t.bash, t.edit, t.write, t.web);
         }
         "claude-img" => {
             // Legacy host-rendered mode: master panel only, no firmware needed.
@@ -559,86 +590,80 @@ fn parse_num(args: &[String], flag: &str, default: f64) -> Result<f64, Box<dyn s
         })
 }
 
-/// Two-screen mode using the firmware-rendered Claude screen.
-///
-/// Clawd lives on one panel, usage on the other, and they trade places on every
-/// jump. Each frame is a five-byte packet, so the slave half is driven by one
-/// small split-RPC per frame — safe, unlike bulk pixel pushes.
-fn run_claude_fw(
-    kb: &Keyboard,
-    interval: Duration,
-    jump_every: Duration,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Both panels run the firmware's Claude screen.
-    for h in Half::both() {
-        kb.set_screen(h, Screen::Claude)?;
+/// Emit one pose as an LVGL image descriptor, scaled by `sc`.
+fn emit_pose(grid: &[String], name: &str, sc: usize) {
+    let mut bytes = Vec::new();
+    for line in grid {
+        for _ in 0..sc {
+            for ch in line.chars() {
+                let px = clawd::pal_pub(ch).map(render::rgb565);
+                for _ in 0..sc {
+                    match px {
+                        Some(p) => {
+                            bytes.push((p >> 8) as u8); // LV_COLOR_16_SWAP
+                            bytes.push((p & 0xFF) as u8);
+                            bytes.push(0xFF);
+                        }
+                        None => bytes.extend_from_slice(&[0, 0, 0]),
+                    }
+                }
+            }
+        }
     }
-    sleep(Duration::from_millis(150));
+    println!("static const uint8_t clawd_px_{name}[] = {{");
+    for row in bytes.chunks(24) {
+        let s: Vec<String> = row.iter().map(|b| format!("0x{b:02X}")).collect();
+        println!("    {},", s.join(", "));
+    }
+    println!("}};");
+    println!("const lv_img_dsc_t clawd_{name} = {{");
+    println!("    .header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA,");
+    println!("    .header.always_zero = 0,");
+    println!("    .header.w = {}, .header.h = {},", clawd::W * sc as i32, clawd::H * sc as i32);
+    println!("    .data_size = {},", bytes.len());
+    println!("    .data = clawd_px_{name},");
+    println!("}};\n");
+}
 
-    let mut clawd_half = Half::Slave;
-    let mut week_ref: u64 = 0;
-    let mut last_refresh = std::time::Instant::now() - Duration::from_secs(999);
-    let mut last_jump = std::time::Instant::now();
+/// Report Claude's activity and the tool tally to the keyboard.
+///
+/// Clawd animates himself; this only tells him *what* to act out. If this
+/// process stops, the firmware's watchdog forgets us after 10s and he returns
+/// to pacing and jumping on his own.
+fn run_watch(kb: &Keyboard, interval: Duration) -> Result<(), Box<dyn std::error::Error>> {
+    let mut w = activity::Watcher::new();
+    let mut last_state = 255u8;
+    let mut last_tally = None;
 
-    let span = proto::SCREEN_W as i32 - 64;
-    let mut x = 8i32;
-    let mut going_right = true;
-    let mut frame = 0usize;
-
-    println!("claude (firmware screens) running — ctrl-c to stop");
+    println!("watching Claude Code — ctrl-c to stop (clawd runs solo without this)");
 
     loop {
-        let usage_half = other_half(clawd_half);
-
-        if last_refresh.elapsed() > Duration::from_secs(20) {
-            let t = usage::collect()?;
-            week_ref = week_ref.max(t.week.billable()).max(1);
-            let pct = ((t.week.billable() as f64 / week_ref as f64) * 100.0) as u8;
-
-            kb.set_usage_shown(usage_half, true)?;
-            kb.set_usage_text(usage_half, 0, &usage::short(t.session.billable()))?;
-            kb.set_usage_text(usage_half, 1, &usage::short(t.week.billable()))?;
-            kb.set_usage_bar(usage_half, pct)?;
-            kb.set_usage_shown(clawd_half, false)?;
-            last_refresh = std::time::Instant::now();
-        }
-
-        if last_jump.elapsed() >= jump_every {
-            let dir = match clawd_half {
-                Half::Master => anim::Dir::LeftToRight,
-                Half::Slave => anim::Dir::RightToLeft,
-            };
-            // The panel he's about to land on drops its usage block first.
-            kb.set_usage_shown(other_half(clawd_half), false)?;
-
-            for st in anim::jump_states(dir) {
-                kb.set_clawd(st.half, st.x, st.pose, st.lift, true)?;
-                if let Some(gone) = st.hide_other {
-                    kb.set_clawd(gone, 0, 0, 0, false)?;
-                }
-                sleep(Duration::from_millis(45));
-            }
-
-            clawd_half = other_half(clawd_half);
-            x = (proto::SCREEN_W as i32 - 64) / 2;
-            last_refresh = std::time::Instant::now() - Duration::from_secs(999);
-            last_jump = std::time::Instant::now();
-            continue;
-        }
-
-        let facing = if going_right { 0 } else { 4 };
-        let pose = facing + if frame % 2 == 0 { 1 } else { 2 };
-        kb.set_clawd(clawd_half, x as i16, pose, 0, true)?;
-
-        if going_right {
-            x += 3;
-            if x >= span { x = span; going_right = false; }
+        let state = w.poll()?;
+        if state != last_state {
+            kb.set_activity(state)?;
+            println!("-> {}", activity::state_name(state));
+            last_state = state;
         } else {
-            x -= 3;
-            if x <= 0 { x = 0; going_right = true; }
+            // Keep the watchdog fed even when nothing changes.
+            kb.set_activity(state)?;
         }
 
-        frame += 1;
+        let t = w.tally();
+        if Some(t) != last_tally {
+            let lines = [
+                format!("BASH {}", t.bash),
+                format!("EDIT {}", t.edit),
+                format!("WRITE {}", t.write),
+                format!("WEB {}", t.web),
+            ];
+            for h in Half::both() {
+                for (i, line) in lines.iter().enumerate() {
+                    kb.set_tally(h, i as u8, line)?;
+                }
+            }
+            last_tally = Some(t);
+        }
+
         sleep(interval);
     }
 }

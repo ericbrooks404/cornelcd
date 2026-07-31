@@ -52,6 +52,8 @@ pub enum Cmd {
     UsgText = 12,
     UsgBar = 13,
     UsgShow = 14,
+    Activity = 15,
+    Tally = 16,
 }
 
 /// Screen geometry. `lv_scr` is 25604 bytes for a 80x160 LV_IMG_CF_TRUE_COLOR
@@ -299,6 +301,9 @@ impl Keyboard {
     }
 
     /// slot 0 = session total, slot 1 = 7-day total.
+    /// Retained: the firmware still handles these, though the usage block was
+    /// removed from the Clawd screen in favour of the arcade tally.
+    #[allow(dead_code)]
     pub fn set_usage_text(&self, half: Half, slot: u8, text: &str) -> Result<(), Error> {
         let mut p = vec![slot];
         p.extend_from_slice(text.as_bytes());
@@ -306,12 +311,29 @@ impl Keyboard {
         self.send(Cmd::UsgText, half, &p)
     }
 
+    #[allow(dead_code)]
     pub fn set_usage_bar(&self, half: Half, percent: u8) -> Result<(), Error> {
         self.send(Cmd::UsgBar, half, &[percent.min(100)])
     }
 
+    #[allow(dead_code)]
     pub fn set_usage_shown(&self, half: Half, shown: bool) -> Result<(), Error> {
         self.send(Cmd::UsgShow, half, &[shown as u8])
+    }
+
+    /// Report what Claude is doing. Only the master needs this — it owns the
+    /// animation and mirrors poses to the slave itself.
+    pub fn set_activity(&self, state: u8) -> Result<(), Error> {
+        self.send(Cmd::Activity, Half::Master, &[state])
+    }
+
+    /// Set one line of the arcade tally. Sent to both halves, because Clawd
+    /// swaps panels and the firmware shows it on whichever he is not on.
+    pub fn set_tally(&self, half: Half, slot: u8, text: &str) -> Result<(), Error> {
+        let mut p = vec![slot];
+        p.extend_from_slice(text.as_bytes());
+        p.push(0);
+        self.send(Cmd::Tally, half, &p)
     }
 }
 
@@ -332,6 +354,7 @@ pub enum Pose {
 }
 
 impl Pose {
+    #[allow(dead_code)]
     pub fn mirrored(self, facing_left: bool) -> u8 {
         let base = self as u8 % 4;
         if facing_left { base + 4 } else { base }
