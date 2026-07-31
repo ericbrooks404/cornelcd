@@ -48,6 +48,10 @@ pub enum Cmd {
     Image = 8,
     ImgFs = 9,
     ImgGif = 10,
+    Clawd = 11,
+    UsgText = 12,
+    UsgBar = 13,
+    UsgShow = 14,
 }
 
 /// Screen geometry. `lv_scr` is 25604 bytes for a 80x160 LV_IMG_CF_TRUE_COLOR
@@ -80,6 +84,7 @@ pub enum Screen {
     Clock = 2,
     NowPlaying = 3,
     Gif = 4,
+    Claude = 5,
 }
 
 impl Screen {
@@ -90,6 +95,7 @@ impl Screen {
             2 => Screen::Clock,
             3 => Screen::NowPlaying,
             4 => Screen::Gif,
+            5 => Screen::Claude,
             _ => return None,
         })
     }
@@ -262,5 +268,72 @@ impl Keyboard {
     /// `which` is the image command whose buffer should be committed.
     pub fn commit_image(&self, half: Half, which: Cmd) -> Result<(), Error> {
         self.send(Cmd::Status, half, &[which as u8])
+    }
+}
+
+/// Firmware-rendered Claude screen (id 5) and its state commands.
+///
+/// These carry a handful of bytes each, so unlike the image commands they are
+/// safe to send to the slave half — one small RPC per frame is exactly what
+/// the split link was designed to carry.
+impl Keyboard {
+    pub fn set_clawd(
+        &self,
+        half: Half,
+        x: i16,
+        pose: u8,
+        lift: u8,
+        visible: bool,
+    ) -> Result<(), Error> {
+        self.send(
+            Cmd::Clawd,
+            half,
+            &[
+                (x >> 8) as u8,
+                (x & 0xFF) as u8,
+                pose,
+                lift,
+                visible as u8,
+            ],
+        )
+    }
+
+    /// slot 0 = session total, slot 1 = 7-day total.
+    pub fn set_usage_text(&self, half: Half, slot: u8, text: &str) -> Result<(), Error> {
+        let mut p = vec![slot];
+        p.extend_from_slice(text.as_bytes());
+        p.push(0);
+        self.send(Cmd::UsgText, half, &p)
+    }
+
+    pub fn set_usage_bar(&self, half: Half, percent: u8) -> Result<(), Error> {
+        self.send(Cmd::UsgBar, half, &[percent.min(100)])
+    }
+
+    pub fn set_usage_shown(&self, half: Half, shown: bool) -> Result<(), Error> {
+        self.send(Cmd::UsgShow, half, &[shown as u8])
+    }
+}
+
+/// Pose indices, matching `enum clawd_pose` in the firmware's clawd_gfx.h.
+/// Kept as documentation of the wire values; anim.rs uses the numbers directly.
+#[allow(dead_code)]
+#[derive(Copy, Clone, Debug)]
+#[repr(u8)]
+pub enum Pose {
+    StandR = 0,
+    RunAR = 1,
+    RunBR = 2,
+    TuckR = 3,
+    StandL = 4,
+    RunAL = 5,
+    RunBL = 6,
+    TuckL = 7,
+}
+
+impl Pose {
+    pub fn mirrored(self, facing_left: bool) -> u8 {
+        let base = self as u8 % 4;
+        if facing_left { base + 4 } else { base }
     }
 }

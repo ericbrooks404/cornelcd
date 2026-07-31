@@ -139,3 +139,12 @@ pub fn draw(fb: &mut Framebuffer, frame: usize, x: i32, y: i32, scale: i32, bg: 
         }
     }
 }
+
+/// Palette lookup for code generation, where there is no background to blend
+/// the drawn stroke against — it resolves to flat accent instead.
+pub fn pal_pub(ch: char) -> Option<u32> {
+    match ch {
+        'b' => Some(CLAUDE_ORANGE),
+        _ => pal(ch, 0x000000),
+    }
+}
