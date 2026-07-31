@@ -11,8 +11,10 @@ license=('MIT')
 # "undefined symbol: hid_open". Disabling LTO here is the standard fix for Rust
 # packages carrying C dependencies.
 options=(!lto)
-depends=('hidapi')
-makedepends=('cargo')
+# hidapi is statically linked by the cc crate, so it is not a runtime dep.
+# dbus is, via ksni's StatusNotifierItem support.
+depends=('dbus' 'systemd-libs')
+makedepends=('cargo' 'systemd')
 install=cornelcd.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('SKIP')

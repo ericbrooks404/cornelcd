@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+      - run: sudo apt-get update && sudo apt-get install -y libudev-dev libdbus-1-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with: { components: clippy }
       - run: cargo build --release --locked
