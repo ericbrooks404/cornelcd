@@ -1,7 +1,11 @@
 //! Drive the LCD screens on a Corne Max over raw HID.
 
+mod clawd;
 mod proto;
+mod render;
+mod screens;
 mod sysinfo;
+mod usage;
 
 use proto::{Cmd, Half, Keyboard, Screen};
 use std::process::ExitCode;
@@ -50,6 +54,56 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     match args[0].as_str() {
         "probe" => return probe(),
+        "testimg" => {
+            // Proves the _IMG_FS path end to end: build a raw RGB565 frame,
+            // push it, commit it. Vertical colour bands so a wrong stride or
+            // byte order is obvious at a glance rather than subtly wrong.
+            let mut fb = vec![0u8; proto::FB_LEN];
+            for y in 0..proto::SCREEN_H {
+                for x in 0..proto::SCREEN_W {
+                    let (r, g, b) = match x * 4 / proto::SCREEN_W {
+                        0 => (0xFF, 0x00, 0x00),
+                        1 => (0x00, 0xFF, 0x00),
+                        2 => (0x00, 0x00, 0xFF),
+                        _ => (0xD9, 0x77, 0x57), // Claude orange
+                    };
+                    let px = rgb565(r, g, b);
+                    let o = (y * proto::SCREEN_W + x) * 2;
+                    // Big-endian: the panel reads the high byte first.
+                    fb[o] = (px >> 8) as u8;
+                    fb[o + 1] = (px & 0xFF) as u8;
+                }
+            }
+
+            let kb = Keyboard::open()?;
+            let t = std::time::Instant::now();
+            for h in &halves {
+                let n = kb.push_image(Cmd::ImgFs, *h, &fb, None)?;
+                kb.commit_image(*h, Cmd::ImgFs)?;
+                println!("pushed {n} chunks ({} bytes) to {h:?}", fb.len());
+            }
+            println!("took {:.2}s", t.elapsed().as_secs_f32());
+        }
+        "usage" => {
+            let t = usage::collect()?;
+            println!(
+                "session {} — {} billable ({} in, {} out, {} cache-read)",
+                t.session_name,
+                usage::short(t.session.billable()),
+                usage::short(t.session.input + t.session.cache_write),
+                usage::short(t.session.output),
+                usage::short(t.session.cache_read),
+            );
+            println!(
+                "7 days  — {} billable across {} transcript(s)",
+                usage::short(t.week.billable()),
+                t.files_scanned
+            );
+        }
+        "claude" => {
+            let kb = Keyboard::open()?;
+            run_claude(&kb, interval)?;
+        }
         "clock" => {
             let kb = Keyboard::open()?;
             for h in &halves {
@@ -96,6 +150,66 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Left half shows usage, right half animates Clawd.
+///
+/// A full frame is 1024 chunks and takes about a second, so only the chunks
+/// that actually changed get pushed. Clawd's body is identical between frames,
+/// so the animation touches a small fraction of the screen.
+fn run_claude(kb: &Keyboard, interval: Duration) -> Result<(), Box<dyn std::error::Error>> {
+    // Send both halves a full frame once, then diff from here on.
+    let mut last_usage: Option<render::Framebuffer> = None;
+    let mut last_clawd: Option<render::Framebuffer> = None;
+
+    let mut frame = 0usize;
+    let mut ticks = 0u32;
+    let mut week_ref: u64 = 0;
+
+    println!("claude screens running (left: usage, right: clawd) — ctrl-c to stop");
+
+    loop {
+        // Usage is expensive to recompute and barely moves; refresh it on the
+        // first tick and then every 30 animation frames.
+        if ticks % 30 == 0 {
+            let t = usage::collect()?;
+            // Keep the bar's reference at the high-water mark so it stays
+            // meaningful without pretending to know a real quota.
+            week_ref = week_ref.max(t.week.billable()).max(1);
+            let fb = screens::usage_screen(&t, week_ref);
+            push(kb, Half::Master, &fb, last_usage.as_ref())?;
+            last_usage = Some(fb);
+        }
+
+        let fb = screens::clawd_screen(frame);
+        push(kb, Half::Slave, &fb, last_clawd.as_ref())?;
+        last_clawd = Some(fb);
+
+        frame += 1;
+        ticks += 1;
+        sleep(interval);
+    }
+}
+
+/// Push a framebuffer, sending only what changed when we have a previous one.
+fn push(
+    kb: &Keyboard,
+    half: Half,
+    fb: &render::Framebuffer,
+    prev: Option<&render::Framebuffer>,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let n = match prev {
+        Some(p) => {
+            let changed = fb.diff_chunks(p);
+            if changed.is_empty() {
+                return Ok(0);
+            }
+            kb.push_image(Cmd::ImgFs, half, &fb.data, Some(&changed))?
+        }
+        None => kb.push_image(Cmd::ImgFs, half, &fb.data, None)?,
+    };
+    kb.commit_image(half, Cmd::ImgFs)?;
+    Ok(n)
 }
 
 fn run_clock(
@@ -203,4 +317,9 @@ fn describe(halves: &[Half]) -> String {
     } else {
         format!("{:?} half", halves[0]).to_lowercase()
     }
+}
+
+/// Pack 8-bit RGB into RGB565.
+fn rgb565(r: u8, g: u8, b: u8) -> u16 {
+    ((r as u16 & 0xF8) << 8) | ((g as u16 & 0xFC) << 3) | (b as u16 >> 3)
 }

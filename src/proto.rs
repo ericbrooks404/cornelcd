@@ -41,7 +41,16 @@ pub enum Cmd {
     Ram = 5,
     Progress = 6,
     NowPlaying = 7,
+    Image = 8,
+    ImgFs = 9,
+    ImgGif = 10,
 }
+
+/// Screen geometry. `lv_scr` is 25604 bytes for a 80x160 LV_IMG_CF_TRUE_COLOR
+/// image, i.e. raw RGB565 little-endian with four bytes of slack.
+pub const SCREEN_W: usize = 80;
+pub const SCREEN_H: usize = 160;
+pub const FB_LEN: usize = SCREEN_W * SCREEN_H * 2;
 
 /// Which half to address. The master forwards slave-tagged packets over TRRS,
 /// so both screens are reachable through the single USB connection.
@@ -172,5 +181,55 @@ impl Keyboard {
     /// Bar/slider commands all take a single 0-100 byte.
     pub fn set_gauge(&self, cmd: Cmd, half: Half, percent: u8) -> Result<(), Error> {
         self.send(cmd, half, &[percent.min(100)])
+    }
+
+    /// Push raw bytes into one of the firmware's image buffers.
+    ///
+    /// The firmware does `memcpy(&buf[index * 25], &data[7], data[6])`, so each
+    /// report carries a chunk index, a length, and up to 25 bytes.
+    ///
+    /// `only_chunks`, when given, restricts the push to those chunk indices —
+    /// used to send just the pixels that changed between animation frames.
+    pub fn push_image(
+        &self,
+        cmd: Cmd,
+        half: Half,
+        bytes: &[u8],
+        only_chunks: Option<&[u16]>,
+    ) -> Result<usize, Error> {
+        const CHUNK: usize = 25;
+        let total = bytes.len().div_ceil(CHUNK);
+        let mut payload = [0u8; 3 + CHUNK];
+        let mut sent = 0;
+
+        let indices: Vec<u16> = match only_chunks {
+            Some(list) => list.to_vec(),
+            None => (0..total as u16).collect(),
+        };
+
+        for idx in indices {
+            let start = idx as usize * CHUNK;
+            if start >= bytes.len() {
+                continue;
+            }
+            let end = (start + CHUNK).min(bytes.len());
+            let n = end - start;
+
+            payload[0] = (idx >> 8) as u8;
+            payload[1] = (idx & 0xFF) as u8;
+            payload[2] = n as u8;
+            payload[3..3 + n].copy_from_slice(&bytes[start..end]);
+            payload[3 + n..].fill(0);
+
+            self.send(cmd, half, &payload)?;
+            sent += 1;
+        }
+        Ok(sent)
+    }
+
+    /// Tell the firmware to bind a freshly-pushed buffer to its widget.
+    /// `which` is the image command whose buffer should be committed.
+    pub fn commit_image(&self, half: Half, which: Cmd) -> Result<(), Error> {
+        self.send(Cmd::Status, half, &[which as u8])
     }
 }
