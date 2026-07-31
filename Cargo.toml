@@ -35,6 +35,7 @@ section = "utils"
 priority = "optional"
 assets = [
     ["target/release/cornelcd", "usr/bin/", "755"],
+    ["target/release/cornelcdw", "usr/bin/", "755"],
     ["packaging/cornelcd.service", "usr/lib/systemd/user/cornelcd.service", "644"],
     ["README.md", "usr/share/doc/cornelcd/README.md", "644"],
 ]

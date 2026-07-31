@@ -25,6 +25,7 @@ Section "Clawd" SecMain
     SectionIn RO
     SetOutPath "$INSTDIR"
     File "cornelcd.exe"
+    File "cornelcdw.exe"
     File "..\..\README.md"
     File "..\..\LICENSE"
 
@@ -33,7 +34,7 @@ Section "Clawd" SecMain
     ; Run at login. HKCU\...\Run is the per-user autostart mechanism, and the
     ; daemon lives in the tray rather than showing a window.
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" \
-        "Clawd" '"$INSTDIR\cornelcd.exe" daemon'
+        "Clawd" '"$INSTDIR\cornelcdw.exe"'
 
     ; Add/Remove Programs entry
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\cornelcd" \
@@ -47,16 +48,17 @@ Section "Clawd" SecMain
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\cornelcd" \
         "NoModify" 1
 
-    CreateShortcut "$SMPROGRAMS\Clawd.lnk" "$INSTDIR\cornelcd.exe" "daemon"
+    CreateShortcut "$SMPROGRAMS\Clawd.lnk" "$INSTDIR\cornelcdw.exe" ""
     WriteUninstaller "$INSTDIR\uninstall.exe"
 SectionEnd
 
 Section "Start now" SecStart
-    Exec '"$INSTDIR\cornelcd.exe" daemon'
+    Exec '"$INSTDIR\cornelcdw.exe"'
 SectionEnd
 
 Section "Uninstall"
     ; Stop it before removing files, or the exe stays locked.
+    nsExec::Exec 'taskkill /F /IM cornelcdw.exe'
     nsExec::Exec 'taskkill /F /IM cornelcd.exe'
 
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Clawd"
@@ -65,6 +67,7 @@ Section "Uninstall"
 
     Delete "$SMPROGRAMS\Clawd.lnk"
     Delete "$INSTDIR\cornelcd.exe"
+    Delete "$INSTDIR\cornelcdw.exe"
     Delete "$INSTDIR\README.md"
     Delete "$INSTDIR\LICENSE"
     Delete "$INSTDIR\uninstall.exe"

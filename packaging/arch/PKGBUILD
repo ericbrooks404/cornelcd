@@ -28,6 +28,7 @@ build() {
 package() {
     cd "$srcdir/$pkgname-$pkgver"
     install -Dm755 target/release/cornelcd "$pkgdir/usr/bin/cornelcd"
+    install -Dm755 target/release/cornelcdw "$pkgdir/usr/bin/cornelcdw"
     install -Dm644 packaging/cornelcd.service \
         "$pkgdir/usr/lib/systemd/user/cornelcd.service"
     install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"

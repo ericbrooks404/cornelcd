@@ -41,7 +41,9 @@ jobs:
         run: cargo build --release --locked
       - name: Stage installer inputs
         shell: pwsh
-        run: Copy-Item target\release\cornelcd.exe packaging\windows\
+        run: |
+          Copy-Item target\release\cornelcd.exe packaging\windows\
+          Copy-Item target\release\cornelcdw.exe packaging\windows\
       - name: Ensure NSIS
         shell: pwsh
         run: |

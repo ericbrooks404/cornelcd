@@ -44,8 +44,15 @@ those objects LTO bitcode that rust's linker cannot resolve
 ## The tray daemon
 
 ```sh
-cornelcd daemon
+cornelcd daemon     # console binary; prints to the terminal
+cornelcdw           # no console window (this is what autostart uses)
 ```
+
+Two binaries ship for the same reason python ships `pythonw.exe`: Windows gives
+a console-subsystem process a console window, which is wrong for something that
+lives in the tray. `cornelcd` is the console/CLI build, `cornelcdw` is the same
+daemon built for the GUI subsystem. On Linux the distinction is inert and either
+works.
 
 Sits in the system tray as Clawd. Right-click for status, a toggle for whether
 to report Claude's activity, and Quit.
