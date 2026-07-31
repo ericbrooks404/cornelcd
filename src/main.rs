@@ -229,6 +229,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 t.files_scanned
             );
         }
+        "clawd" => {
+            // One-shot: place Clawd at a position/pose. For stepping through
+            // the animation by hand.
+            let x = parse_num(&args, "--x", 8.0)? as i16;
+            let pose = parse_num(&args, "--pose", 0.0)? as u8;
+            let lift = parse_num(&args, "--lift", 0.0)? as u8;
+            let hide = args.iter().any(|a| a == "--hide");
+            let kb = Keyboard::open()?;
+            for h in &halves {
+                kb.set_clawd(*h, x, pose, lift, !hide)?;
+            }
+            println!("clawd x={x} pose={pose} lift={lift} visible={}", !hide);
+        }
         "claude" => {
             let every = Duration::from_secs_f64(parse_num(&args, "--jump-every", 20.0)?);
             let kb = Keyboard::open()?;
